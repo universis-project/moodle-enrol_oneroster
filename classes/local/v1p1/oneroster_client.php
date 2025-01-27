@@ -730,6 +730,10 @@ EOF;
         ]);
 
         if ($localcourse) {
+            // do not change category and use the existing one
+            if ($localcourse->category) {
+                $remotecourse->category = $localcourse->category;
+            }
             $update = false;
             foreach ((array) $remotecourse as $field => $value) {
                 if ($localcourse->{$field} != $value) {
