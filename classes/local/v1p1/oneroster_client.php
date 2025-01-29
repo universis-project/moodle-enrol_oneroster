@@ -915,13 +915,17 @@ EOF;
         // The user exists, user_update_user works on user 'id', so fill that in.
         $remoteuser->id = $localuser->id;
 
-        if ($localuser->timemodified > converter::from_datetime_to_unix($entity->get('dateLastModified'))) {
-            // if ($CFG->debugdeveloper) {
-            //     $this->get_trace()->output(sprintf("Skipping update of existing user %s with id %s",
-            //         $localuser->username,
-            //         $localuser->id
-            //     ), 5);
-            // }
+        // a user should be updated if the remote user has been modified after the local user
+        // but sometimes we should update the user even if the remote user has not been modified
+        // for example, if the remote user has a different department or institution than the local user
+        // we should force update the local user
+        $force = FALSE;
+        if ((property_exists($remoteuser, 'department') && $remoteuser->department != $localuser->department) ||
+            (property_exists($remoteuser, 'institution') && $remoteuser->institution != $localuser->institution)) {
+            $force = TRUE;
+        }
+
+        if ($force == FALSE && $localuser->timemodified > converter::from_datetime_to_unix($entity->get('dateLastModified'))) {
             return $localuser;
         }
 
