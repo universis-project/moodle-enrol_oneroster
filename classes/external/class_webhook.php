@@ -1,12 +1,12 @@
 <?php
 
 namespace enrol_oneroster\external;
-use external_api;
-use external_function_parameters;
-use external_single_structure;
-use external_multiple_structure;
-use external_value;
-use external_warnings;
+use \core_external\external_api as external_api;
+use \core_external\external_function_parameters as external_function_parameters;
+use \core_external\external_single_structure as external_single_structure;
+use \core_external\external_multiple_structure as external_multiple_structure;
+use \core_external\external_value as external_value;
+use \core_external\external_warnings as external_warnings;
 
 use enrol_oneroster\client_helper;
 
