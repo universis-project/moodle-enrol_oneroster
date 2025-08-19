@@ -64,4 +64,11 @@ interface enrollment_representation {
      * @return  stdClass
      */
     public function get_enrolment_term();
+
+    /**
+     * Get a collection of terms associated with the enrollment.
+     *
+     * @return  stdClass[]
+     */
+    public function get_enrolment_terms();
 }

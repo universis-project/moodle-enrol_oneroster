@@ -52,6 +52,7 @@ use enrol_oneroster\local\entities\org as org_entity;
 use enrol_oneroster\local\entities\school as school_entity;
 use enrol_oneroster\local\entities\user as user_entity;
 use enrol_oneroster\local\entities\term as term_entity;
+use enrol_oneroster\local\entities\academic_session as academic_session_entity;
 use moodle_url;
 use progress_trace;
 use stdClass;
@@ -481,6 +482,20 @@ EOF;
                                 groups_add_member($course_group, $localuserid, 'enrol_oneroster');
                             }
                         }
+                        // get extra enrolment terms
+                        $enrolment_terms = $enrollment->get_enrolment_terms();
+                        foreach ($enrolment_terms as $term) {
+                            // try to find if the current course has a group associated with the term
+                            $course_group = $this->create_course_group_from_term($localcourse, $term);
+                            // get remote user
+                            $userentity = $enrollment->get_user_entity();
+                            // find local user
+                            $localuserid = $this->get_user_mapping_for_user($userentity);
+                            if ($localuserid) {
+                                // add group membership
+                                groups_add_member($course_group, $localuserid, 'enrol_oneroster');
+                            }
+                        }
                     }
                 }
             }
@@ -547,10 +562,10 @@ EOF;
     /**
      * Create course group using the given academic session
      * @param \stdClass $course
-     * @param term_entity $term
+     * @param academic_session_entity $term
      * @return \stdClass
      */
-    protected function create_course_group_from_term(stdClass $course, term_entity $term): stdClass {
+    protected function create_course_group_from_term(stdClass $course, academic_session_entity $term): stdClass {
         global $DB;
         // if course groups are not enabled
         if (!is_array($course->groups)) {
