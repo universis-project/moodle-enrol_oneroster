@@ -75,7 +75,7 @@ $academic_sessions = $client->fetch_academic_session_list();
 $found_sessions = [];
 foreach ($academic_sessions as $academic_session) {
     // get only semesters
-    if ($academic_session->get('type') == 'semester') {
+    if ($academic_session->get('type') == 'semester' || $academic_session->get('type') == 'schoolYear') {
         $found_sessions[$academic_session->get('sourcedId')] = $academic_session->get('title');
     }
 }

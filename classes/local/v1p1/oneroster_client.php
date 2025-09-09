@@ -334,7 +334,28 @@ EOF;
         // select active academic session
         $academic_session = get_config('enrol_oneroster', 'datasync_academic_session');
         if ($academic_session) {
-            $classfilter->add_filter('terms.sourcedId', $academic_session, '=');
+            // get academic session
+            $academic_session_filter = new filter();
+            $academic_session_filter->add_filter('sourcedId', $academic_session, '=');
+            $academic_sessions = $this->get_container()->get_collection_factory()->get_academic_sessions([], $academic_session_filter);
+            foreach ($academic_sessions as $session) {
+                // exit the loop to get session
+                break;
+            }
+            if ($session instanceof academic_session_entity) {
+               // get academic session type
+                $sessiontype = $session->get('type');
+                if ($sessiontype == 'schoolYear') {
+                    // if school year, include semesters (filtering by parent)
+                    $classfilter->add_filter('terms.parent', $session->get('sourcedId'), '=');
+                } else {
+                    // otherwise, filter by the exact term
+                    $classfilter->add_filter('terms.sourcedId', $academic_session, '=');
+                }
+            } else {
+                // if no session found, filter by the exact term
+                $classfilter->add_filter('terms.sourcedId', $academic_session, '=');
+            }
         }
 
         $this->get_trace()->output("Fetching class data", 3);
@@ -1376,7 +1397,7 @@ EOF;
      */
     public function fetch_academic_session_list(): Iterable {
         return $this->get_container()->get_collection_factory()->get_academic_sessions(array(
-            'sort' => 'schoolYear',
+            'sort' => 'schoolYear,type',
             'orderBy' => 'asc'
         ));
     }
