@@ -488,37 +488,21 @@ EOF;
                                 ),
                                 4
                             );
-                            // change idnumber
-                            $existingcourse->idnumber = $class->get('sourcedId');
+
+                            $existingcourse->idnumber = $otherclass->get('sourcedId');
                             update_course($existingcourse);
+                                $this->get_trace()->output(
+                                sprintf(
+                                    "Linked existing course '%s' with id %s to class '%s' with id %s",
+                                    $existingcourse->fullname,
+                                    $existingcourse->idnumber,
+                                    $class->get('title'),
+                                    $class->get('sourcedId')
+                                ),
+                                4
+                            );
+                            break;
                         }
-                    }
-                    // if link classes found, output message
-                    if (count($link_classes) == 1) {
-                        $this->get_trace()->output(
-                            sprintf(
-                                "Linked existing course '%s' with id %s to class '%s' with id %s",
-                                $existingcourse->fullname,
-                                $existingcourse->idnumber,
-                                $class->get('title'),
-                                $class->get('sourcedId')
-                            ),
-                            4
-                        );
-                        $existingcourse->idnumber = $link_classes[0];
-                        update_course($existingcourse);
-                    } else if (count($link_classes) > 1) {
-                        $this->get_trace()->output(
-                            sprintf(
-                                "Found %d possible existing courses to link to class '%s' with id %s. Existing course '%s' with id %s not linked.",
-                                count($link_classes),
-                                $class->get('title'),
-                                $class->get('sourcedId'),
-                                $existingcourse->fullname,
-                                $existingcourse->idnumber
-                            ),
-                            4
-                        );
                     }
                 }
             }
