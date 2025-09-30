@@ -53,6 +53,7 @@ use enrol_oneroster\local\entities\school as school_entity;
 use enrol_oneroster\local\entities\user as user_entity;
 use enrol_oneroster\local\entities\term as term_entity;
 use enrol_oneroster\local\entities\academic_session as academic_session_entity;
+use enrol_oneroster\local\collections\academic_sessions as academic_sessions_collection;
 use moodle_url;
 use progress_trace;
 use stdClass;
@@ -298,6 +299,7 @@ EOF;
         }
         $this->get_trace()->output("Finished processing users. Processed {$usercount} users", 3);
     }
+
     /**
      * Synchronise the entire School.
      *
@@ -364,6 +366,22 @@ EOF;
         $snapshots = $this->container->get_cache_factory()->get_class_snapshot_cache();
         // use class groups
         $use_class_groups = get_config('enrol_oneroster', 'oneroster_sync_groups');
+
+        $keep_existing_class = get_config('enrol_oneroster', 'keep_existing_class');
+        // get all academic sessions
+        /**
+         * @var academic_sessions_collection $academic_sessions
+         */
+        $academic_session_collection = $this->get_container()->get_collection_factory()->get_academic_sessions([]);
+        /**
+         * @var stdClass[]
+         * 
+         */
+        $academic_sessions = [];
+        foreach ($academic_session_collection as $session) {
+            $academic_sessions[] = $session->get_data();
+        }
+
         foreach ($classes as $class) {
             // get class snapshot
             $sourcedid = $class->get('sourcedId');
@@ -397,6 +415,114 @@ EOF;
                 4
             );
 
+            // before updating or creating course, check if course exists for a different term
+            if ($keep_existing_class) {
+                // search for existing course with the same idnumber
+                $existingcourse = $DB->get_record('course', ['idnumber' => $class->get('sourcedId')]);
+                // if course does not exist, search for an existing course associated with a different term 
+                if (!$existingcourse) {
+                    // get one roster classes filtering by course
+                    $course = $class->get('course')->sourcedId;
+                    $otherclasses = $this->get_container()->get_collection_factory()->get_classes(
+                        [],
+                        (new filter())->add_filter('course', $course, '=')
+                    );
+                    // loop through classes in order to find a corrensponding class
+                    $link_classes = [];
+                    foreach ($otherclasses as $otherclass) {
+                        // skip same class
+                        if ($otherclass->get('sourcedId') == $class->get('sourcedId')) {
+                            continue;
+                        }
+                        // search for a course with the same idnumber
+                        $existingcourse = $DB->get_record('course', ['idnumber' => $otherclass->get('sourcedId')]);
+                        if ($existingcourse) {
+                            // we are expecting that the existing course should be associated with
+                            // the corresponding academic session of another school/academic year
+                            // get first term of the current class
+                            $otherclass_term = current($otherclass->get('terms'));
+                            if ($otherclass_term) {
+                                $otherclass_term = current(array_filter($academic_sessions, function ($value) use ($otherclass_term) {
+                                    return $value->sourcedId == $otherclass_term->sourcedId;
+                                }));
+                            }
+                            // if no term for other class, continue
+                            if (!$otherclass_term) {
+                                continue;
+                            }
+                            // "keep existing class" process is trying to find a course associated with a corresponding term
+                            // this operation is not really supported by one roster spec (an academic session cannot be identified across different school years)
+                            // for supporting this feature, we are assuming that that academic session metadata holds such information
+                            // a proposal for having a standard way of identifying academic sessions across school years might be metadata.href attribute 
+                            // where the producer of the one roster might include an academic session identifier across school years
+                            $otherclass_term->metadata = $otherclass_term->metadata ?? new stdClass();
+                            $otherclass_term->metadata->href = $otherclass_term->metadata->href ?? '00000000-0000-0000-0000-000000000001';
+
+                            // get first term of processing class
+                            $class_term = current($class->get('terms'));
+                            if ($class_term) {
+                                $class_term = current(array_filter($academic_sessions, function ($value) use ($class_term) {
+                                    return $value->sourcedId == $class_term->sourcedId;
+                                }));
+                            }
+                            // if no term for class, continue
+                            if (!$class_term) {
+                                continue;
+                            }
+                            $class_term->metadata = $class_term->metadata ?? new stdClass();
+                            $class_term->metadata->href = $class_term->metadata->href ?? '00000000-0000-0000-0000-000000000002';
+
+                            if ($otherclass_term->metadata->href != $class_term->metadata->href) {
+                                // if terms do not match, continue
+                                continue;
+                            }
+
+                            $link_classes[] = $otherclass->get('sourcedId');
+                            $this->get_trace()->output(
+                                sprintf(
+                                    "Preparing to link existing course '%s' with id %s to class '%s' with id %s",
+                                    $existingcourse->fullname,
+                                    $existingcourse->idnumber,
+                                    $class->get('title'),
+                                    $class->get('sourcedId')
+                                ),
+                                4
+                            );
+                            // change idnumber
+                            $existingcourse->idnumber = $class->get('sourcedId');
+                            update_course($existingcourse);
+                        }
+                    }
+                    // if link classes found, output message
+                    if (count($link_classes) == 1) {
+                        $this->get_trace()->output(
+                            sprintf(
+                                "Linked existing course '%s' with id %s to class '%s' with id %s",
+                                $existingcourse->fullname,
+                                $existingcourse->idnumber,
+                                $class->get('title'),
+                                $class->get('sourcedId')
+                            ),
+                            4
+                        );
+                        $existingcourse->idnumber = $link_classes[0];
+                        update_course($existingcourse);
+                    } else if (count($link_classes) > 1) {
+                        $this->get_trace()->output(
+                            sprintf(
+                                "Found %d possible existing courses to link to class '%s' with id %s. Existing course '%s' with id %s not linked.",
+                                count($link_classes),
+                                $class->get('title'),
+                                $class->get('sourcedId'),
+                                $existingcourse->fullname,
+                                $existingcourse->idnumber
+                            ),
+                            4
+                        );
+                    }
+                }
+            }
+            
             // update or create class
             $localcourse = $this->update_or_create_course($class);
             if (!$localcourse) {

@@ -94,5 +94,7 @@ $string['settings_connection_oneroster_user_department'] = 'department';
 $string['settings_connection_oneroster_user_department_desc'] = 'Define the attribute of a user that is going to be mapped to the department field in Moodle. e.g. Use field "alternateMatriculationNumber" provided by OneRoster producer and map it to "department" field in Moodle.';
 $string['settings_connection_oneroster_user_institution'] = 'institution';
 $string['settings_connection_oneroster_user_institution_desc'] = 'Define the attribute of a user that is going to be mapped to the institution field in Moodle. e.g. Use field "matriculationNumber" provided by OneRoster producer and map it to "institution" field in Moodle.';
+$string['settings_keep_existing_class'] = 'Keep existing classes';
+$string['settings_keep_existing_class_desc'] = 'If enabled, existing courses will be synchronized, even if they appear to refer to a different academic session based on their attributes. A Moodle course will be linked and synchronized to the given OneRoster class.';
 
 
