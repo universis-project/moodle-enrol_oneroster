@@ -490,7 +490,7 @@ EOF;
                                 4
                             );
 
-                            $existingcourse->idnumber = $otherclass->get('sourcedId');
+                            $existingcourse->idnumber = $class->get('sourcedId');
                             update_course($existingcourse);
                                 $this->get_trace()->output(
                                 sprintf(
