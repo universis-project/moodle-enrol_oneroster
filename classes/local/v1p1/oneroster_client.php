@@ -309,6 +309,7 @@ EOF;
     public function sync_school(school_entity $school, ?DateTime $onlysince = null, ?array $filter = null): void {
         global $CFG, $DB;
         require_once("{$CFG->dirroot}/group/lib.php");
+        require_once("{$CFG->dirroot}/course/lib.php");
         // Updating the category for this school.
         $this->update_or_create_category($school);
 
