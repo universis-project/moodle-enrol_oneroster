@@ -419,6 +419,8 @@ EOF;
         }
 
         foreach ($classes as $class) {
+            // status to track if class has been linked to an existing course
+            $class_linked = false;
             // get class snapshot
             $sourcedid = $class->get('sourcedId');
             $snapshot = $snapshots->get($sourcedid);
@@ -464,7 +466,6 @@ EOF;
                         (new filter())->add_filter('course', $course, '=')
                     );
                     // loop through classes in order to find a corrensponding class
-                    $link_classes = [];
                     foreach ($otherclasses as $otherclass) {
                         // skip same class
                         if ($otherclass->get('sourcedId') == $class->get('sourcedId')) {
@@ -478,6 +479,14 @@ EOF;
                             $course_keep_existing_class = $metadata['keep_existing_class'] ?? 'Yes';
                             if (strtolower($course_keep_existing_class) == 'no') {
                                 // if keep existing is not set, continue
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as the corresponding course has 'keep_existing_class' set to 'No'",
+                                        $otherclass->get('title'),
+                                        $otherclass->get('sourcedId')
+                                    ),
+                                    4
+                                );
                                 continue;
                             }
                             // we are expecting that the existing course should be associated with
@@ -491,6 +500,14 @@ EOF;
                             }
                             // if no term for other class, continue
                             if (!$otherclass_term) {
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as it has no term associated",
+                                        $otherclass->get('title'),
+                                        $otherclass->get('sourcedId')
+                                    ),
+                                    4
+                                );
                                 continue;
                             }
                             // "keep existing class" process is trying to find a course associated with a corresponding term
@@ -510,6 +527,14 @@ EOF;
                             }
                             // if no term for class, continue
                             if (!$class_term) {
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as it has no term associated",
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
                                 continue;
                             }
                             $class_term->metadata = $class_term->metadata ?? new stdClass();
@@ -517,10 +542,16 @@ EOF;
 
                             if ($otherclass_term->metadata->href != $class_term->metadata->href) {
                                 // if terms do not match, continue
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as it is associated with a different academic session",
+                                        $otherclass->get('title'),
+                                        $otherclass->get('sourcedId')
+                                    ),
+                                    4
+                                );
                                 continue;
                             }
-
-                            $link_classes[] = $otherclass->get('sourcedId');
                             $this->get_trace()->output(
                                 sprintf(
                                     "Preparing to link existing course '%s' with id %s to class '%s' with id %s",
@@ -531,7 +562,6 @@ EOF;
                                 ),
                                 4
                             );
-
                             $existingcourse->idnumber = $class->get('sourcedId');
                             update_course($existingcourse);
                                 $this->get_trace()->output(
@@ -544,7 +574,43 @@ EOF;
                                 ),
                                 4
                             );
+                            $class_linked = true;
+                            // if class has been linked to an existing course, reset all user data
+                            $this->get_trace()->output(
+                                sprintf(
+                                    "Resetting all user data for course '%s' with id %s as it has been linked to an existing course",
+                                    $class->get('title'),
+                                    $class->get('sourcedId')
+                                ),
+                                4
+                            );
+                            require_once("{$CFG->dirroot}/course/lib.php");
+                            // reset course
+                            $data = array(
+                                'id' => $existingcourse->id,
+                                'reset_events' => 1,
+                                'reset_notes' => 1,
+                                'reset_gradebook_items' => 1,
+                                'reset_gradebook_grades' => 1,
+                                'reset_completion' => 1,
+                                'reset_groups' => 0,
+                                'reset_groupings' => 0,
+                                'reset_outcomes' => 1,
+                                'reset_forum_subscriptions' => 1,
+                                'reset_drafts' => 1,
+                                'reset_user_preferences' => 0,
+                            );
+                            $status = reset_course_userdata($data);
                             break;
+                        } else {
+                            $this->get_trace()->output(
+                                sprintf(
+                                    "Link operation did not find existing course for class '%s' with id %s. Continuing search.",
+                                    $otherclass->get('title'),
+                                    $otherclass->get('sourcedId')
+                                ),
+                                4
+                            );
                         }
                     }
                 } else {
