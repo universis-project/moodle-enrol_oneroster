@@ -7,6 +7,7 @@ use \core_external\external_single_structure as external_single_structure;
 use \core_external\external_multiple_structure as external_multiple_structure;
 use \core_external\external_value as external_value;
 use \core_external\external_warnings as external_warnings;
+use enrol_oneroster\json_progress_trace as json_progress_trace;
 
 use enrol_oneroster\client_helper;
 
@@ -45,6 +46,9 @@ class class_webhook extends external_api {
             $config->clientid,
             $config->secret
         );
+        // set trace
+        $trace = new json_progress_trace();
+        $client->set_trace($trace);
         // create extra filter for the specific class
         $filter = [
             'sourcedId' => $sourcedId
@@ -63,16 +67,22 @@ class class_webhook extends external_api {
                 'message' => $e->getMessage()
             ];
         }
-        
+        $messages = $trace->get_data();
         return [
             'result' => $result,
-            'warnings' => $warnings
+            'warnings' => $warnings,
+            'messages' => $messages
         ];
     }
     public static function execute_returns(): external_single_structure {
         return new external_single_structure([
             'result' => new external_value(PARAM_BOOL, 'The processing result'),
-            'warnings' => new external_warnings()
+            'warnings' => new external_warnings(),
+            'messages' => new external_multiple_structure(
+                new external_value(PARAM_TEXT, 'A progress trace message'),
+                'List of progress trace messages',
+                VALUE_OPTIONAL
+            )
         ]);
     }
 }

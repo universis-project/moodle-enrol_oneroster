@@ -24,6 +24,7 @@
 
 namespace enrol_oneroster\local\v1p1;
 
+use core\output\progress_trace\text_progress_trace;
 use DateTime;
 use Exception;
 use context_user;
@@ -212,19 +213,21 @@ trait oneroster_client {
         }
         
         $this->get_trace()->output("Completed synchronisation of Rostering information");
-        $this->get_trace()->output(sprintf("Entity\t\tCreate\tUpdate\tExclude\tDelete"), 1);
-        foreach ($this->get_metrics() as $thing => $actions) {
-            $this->get_trace()->output(
-                sprintf(
-                    "Entity '%s'\t%d\t%d\t%d\t%d",
-                    $thing,
-                    $actions['create'],
-                    $actions['update'],
-                    $actions['exclude'],
-                    $actions['delete']
-                ),
-                1
-            );
+        if ($this->get_trace() instanceof text_progress_trace) {
+            $this->get_trace()->output(sprintf("Entity\t\tCreate\tUpdate\tExclude\tDelete"), 1);
+            foreach ($this->get_metrics() as $thing => $actions) {
+                $this->get_trace()->output(
+                    sprintf(
+                        "Entity '%s'\t%d\t%d\t%d\t%d",
+                        $thing,
+                        $actions['create'],
+                        $actions['update'],
+                        $actions['exclude'],
+                        $actions['delete']
+                    ),
+                    1
+                );
+            }
         }
     }
 
@@ -298,6 +301,38 @@ EOF;
             $usercount++;
         }
         $this->get_trace()->output("Finished processing users. Processed {$usercount} users", 3);
+    }
+
+    private function get_course_metadata($courseid) {
+        $handler = \core_customfield\handler::get_handler('core_course', 'course');
+        // This is equivalent to the line above.
+        //$handler = \core_course\customfield\course_handler::create();
+        $datas = $handler->get_instance_data($courseid, true);
+        $metadata = [];
+        foreach ($datas as $data) {
+            if (empty($data->get_value())) {
+                continue;
+            }
+            $field = $data->get_field();
+            //$cat = $field->get_category()->get('name');
+            // get field type
+            $type = $field->get('type');
+            if ($type === 'select') {
+                $value = intval($data->get_value()) - 1;
+                // get options
+                $options = $field->get('configdata')['options'];
+                // options is a \n separated list of values
+                $options = array_map('trim', explode("\n", $options));
+                if ($options && array_key_exists($value, $options)) {
+                    $metadata[$field->get('shortname')] = $options[$value];
+                } else {
+                    $metadata[$field->get('shortname')] = '-';
+                }
+            } else {
+                $metadata[$field->get('shortname')] = $data->get_value();
+            }
+        }
+        return $metadata;
     }
 
     /**
@@ -438,6 +473,13 @@ EOF;
                         // search for a course with the same idnumber
                         $existingcourse = $DB->get_record('course', ['idnumber' => $otherclass->get('sourcedId')]);
                         if ($existingcourse) {
+                            // get custom field
+                            $metadata = $this->get_course_metadata($existingcourse->id);
+                            $course_keep_existing_class = $metadata['keep_existing_class'] ?? 'Yes';
+                            if (strtolower($course_keep_existing_class) == 'no') {
+                                // if keep existing is not set, continue
+                                continue;
+                            }
                             // we are expecting that the existing course should be associated with
                             // the corresponding academic session of another school/academic year
                             // get first term of the current class
@@ -505,6 +547,8 @@ EOF;
                             break;
                         }
                     }
+                } else {
+                    $metadata = $this->get_course_metadata($existingcourse->id);
                 }
             }
             
