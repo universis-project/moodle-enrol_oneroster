@@ -586,17 +586,20 @@ EOF;
                             );
                             require_once("{$CFG->dirroot}/course/lib.php");
                             // reset course
-                            $data = array(
+                            $student_role = get_archetype_roles('student');
+                            $data = (object) array(
                                 'id' => $existingcourse->id,
                                 'reset_events' => 1,
                                 'reset_notes' => 1,
                                 'reset_gradebook_items' => 1,
+                                'unenrol_users' => array_keys($student_role),
                                 'reset_gradebook_grades' => 1,
                                 'reset_completion' => 1,
                                 'reset_groups' => 0,
                                 'reset_groupings' => 0,
                                 'reset_outcomes' => 1,
                                 'reset_forum_subscriptions' => 1,
+                                'reset_forum_all' => 1,
                                 'reset_drafts' => 1,
                                 'reset_user_preferences' => 0,
                             );
@@ -766,11 +769,13 @@ EOF;
                         }
                         // unenrol the user
                         $localuser = \core_user::get_user($userid);
-                        $this->get_trace()->output(sprintf(
-                            "Unenroling user %s from course with id %s",
-                            $localuser->username,
-                            $localcourse->id
-                        ), 5);
+                        if ($this->get_trace() instanceof text_progress_trace) {
+                            $this->get_trace()->output(sprintf(
+                                "Unenroling user %s from course with id %s",
+                                $localuser->username,
+                                $localcourse->id
+                            ), 5);
+                        }
                         // feature: course group management
                         // description: remove user from groups
                         if (is_array($localcourse->groups)) {
