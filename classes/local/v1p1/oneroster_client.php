@@ -605,6 +605,9 @@ EOF;
                                 'reset_assign_submissions' => 1,
                                 'reset_assign_user_overrides' => 1,
                                 'reset_assign_group_overrides' => 1,
+                                'reset_quiz_attempts' => 1,
+                                'reset_quiz_user_overrides' => 1,
+                                'reset_quiz_group_overrides' => 1
                             );
                             $status = reset_course_userdata($data);
                             break;
