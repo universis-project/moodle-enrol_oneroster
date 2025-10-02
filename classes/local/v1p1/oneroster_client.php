@@ -602,6 +602,9 @@ EOF;
                                 'reset_forum_all' => 1,
                                 'reset_drafts' => 1,
                                 'reset_user_preferences' => 0,
+                                'reset_assign_submissions' => 1,
+                                'reset_assign_user_overrides' => 1,
+                                'reset_assign_group_overrides' => 1,
                             );
                             $status = reset_course_userdata($data);
                             break;
