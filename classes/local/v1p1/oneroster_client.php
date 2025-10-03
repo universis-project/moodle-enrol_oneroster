@@ -55,6 +55,7 @@ use enrol_oneroster\local\entities\user as user_entity;
 use enrol_oneroster\local\entities\term as term_entity;
 use enrol_oneroster\local\entities\academic_session as academic_session_entity;
 use enrol_oneroster\local\collections\academic_sessions as academic_sessions_collection;
+use mod_bigbluebuttonbn\local\helpers\reset;
 use moodle_url;
 use progress_trace;
 use stdClass;
@@ -100,6 +101,11 @@ trait oneroster_client {
 
     /** @var array List of tracking metrics */
     protected $metrics = [];
+
+    /**
+     * @var stdClass[] Cache of all academic sessions
+     */
+    protected $all_academic_sessions = null;
 
     /**
      * Get the Base URL for this One Roster API version.
@@ -335,6 +341,26 @@ EOF;
         return $metadata;
     }
 
+    private function get_all_academic_sessions(): array {
+        if ($this->all_academic_sessions !== null) {
+            return $this->all_academic_sessions;
+        }
+        // get all academic sessions
+        /**
+         * @var academic_sessions_collection $academic_sessions
+         */
+        $academic_session_collection = $this->get_container()->get_collection_factory()->get_academic_sessions([]);
+        /**
+         * @var stdClass[]
+         * 
+         */
+        $this->all_academic_sessions = [];
+        foreach ($academic_session_collection as $session) {
+            $this->all_academic_sessions[] = $session->get_data();
+        }
+        return $this->all_academic_sessions;
+    }
+
     /**
      * Synchronise the entire School.
      *
@@ -404,19 +430,11 @@ EOF;
         $use_class_groups = get_config('enrol_oneroster', 'oneroster_sync_groups');
 
         $keep_existing_class = get_config('enrol_oneroster', 'keep_existing_class');
-        // get all academic sessions
         /**
-         * @var academic_sessions_collection $academic_sessions
-         */
-        $academic_session_collection = $this->get_container()->get_collection_factory()->get_academic_sessions([]);
-        /**
+         * get all academic sessions
          * @var stdClass[]
-         * 
          */
-        $academic_sessions = [];
-        foreach ($academic_session_collection as $session) {
-            $academic_sessions[] = $session->get_data();
-        }
+        $academic_sessions = $this->get_all_academic_sessions();
 
         foreach ($classes as $class) {
             // status to track if class has been linked to an existing course
@@ -454,6 +472,7 @@ EOF;
             );
 
             // before updating or creating course, check if course exists for a different term
+            $link_courses = [];
             if ($keep_existing_class) {
                 // search for existing course with the same idnumber
                 $existingcourse = $DB->get_record('course', ['idnumber' => $class->get('sourcedId')]);
@@ -461,17 +480,78 @@ EOF;
                 if (!$existingcourse) {
                     // get one roster classes filtering by course
                     $course = $class->get('course')->sourcedId;
-                    $otherclasses = $this->get_container()->get_collection_factory()->get_classes(
+                    $otherclasses_collection = $this->get_container()->get_collection_factory()->get_classes(
                         [],
                         (new filter())->add_filter('course', $course, '=')
                     );
-                    // loop through classes in order to find a corrensponding class
-                    foreach ($otherclasses as $otherclass) {
-                        // skip same class
+                    $this->get_trace()->output(
+                        sprintf(
+                            "Searching for existing course to link to class '%s' with id %s",
+                            $class->get('title'),
+                            $class->get('sourcedId')
+                        ),
+                        4   
+                    );
+                    $otherclasses = [];
+                    foreach ($otherclasses_collection as $otherclass) {
+                        $otherclasses[] = $otherclass;
+                        $otherclass->terms = array_map(function($term) use ($academic_sessions) {
+                            return current(array_filter($academic_sessions, function ($value) use ($term) {
+                                return $value->sourcedId == $term->sourcedId;
+                            }));
+                        }, $otherclass->get('terms'));
+                    }
+                    $this->get_trace()->output(
+                        sprintf(
+                            "Found %d other classes for course '%s'",
+                            count($otherclasses),
+                            $course
+                        ),
+                        4   
+                    );
+                    // get first term of the class being processed
+                    $class_term = current($class->get('terms'));
+                    if ($class_term) {
+                        $class_term = current(array_filter($academic_sessions, function ($value) use ($class_term) {
+                            return $value->sourcedId == $class_term->sourcedId;
+                        }));
+                    }
+                    // filter other classes to only those that have a term in common with the class being processed
+                    $otherclasses = array_filter($otherclasses, function($otherclass) use ($class_term, $class) {
                         if ($otherclass->get('sourcedId') == $class->get('sourcedId')) {
-                            continue;
+                            return false;
                         }
-                        // search for a course with the same idnumber
+                        // filter out classes that do not have any term in common with the class being processed
+                        $otherclass_term = reset($otherclass->terms);
+                        if ($otherclass_term && $otherclass_term->metadata && $otherclass_term->metadata->href) {
+                            return $class_term->metadata->href == $otherclass_term->metadata->href;
+                        }
+                        return false;
+                    });
+
+                    $this->get_trace()->output(
+                        sprintf(
+                            "After filtering by term, found %d other classes for course '%s'",
+                            count($otherclasses),
+                            $course
+                        ),
+                        4   
+                    );
+
+                    if (count($otherclasses) > 1) {
+                        $this->get_trace()->output(
+                            sprintf(
+                                "Warning: Found %d other classes for course '%s' while processing class '%s' with id %s. Skipping link process.",
+                                count($otherclasses),
+                                $course,
+                                $class->get('title'),
+                                $class->get('sourcedId')
+                            ),
+                            4   
+                        );
+                        $otherclasses = [];
+                    }
+                    foreach ($otherclasses as $otherclass) {
                         $existingcourse = $DB->get_record('course', ['idnumber' => $otherclass->get('sourcedId')]);
                         if ($existingcourse) {
                             // get custom field
@@ -552,6 +632,7 @@ EOF;
                                 );
                                 continue;
                             }
+
                             $this->get_trace()->output(
                                 sprintf(
                                     "Preparing to link existing course '%s' with id %s to class '%s' with id %s",
@@ -562,33 +643,64 @@ EOF;
                                 ),
                                 4
                             );
-                            $existingcourse->idnumber = $class->get('sourcedId');
-                            update_course($existingcourse);
-                                $this->get_trace()->output(
-                                sprintf(
-                                    "Linked existing course '%s' with id %s to class '%s' with id %s",
-                                    $existingcourse->fullname,
-                                    $existingcourse->idnumber,
-                                    $class->get('title'),
-                                    $class->get('sourcedId')
-                                ),
-                                4
+                            $link_courses[] = (object) array(
+                                'id' => $existingcourse->id,
+                                'fullname' => $existingcourse->fullname,
+                                'idnumber' => $class->get('sourcedId')
                             );
-                            $class_linked = true;
-                            // if class has been linked to an existing course, reset all user data
+                        }
+                        // the link operation did not find any course
+                        if (count($link_courses) == 0) {
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Link operation did not find existing course for class '%s' with id %s.",
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                        } else if (count($link_courses) > 1) { 
+                            // if more than one course found, skip linking
                             $this->get_trace()->output(
                                 sprintf(
-                                    "Resetting all user data for course '%s' with id %s as it has been linked to an existing course",
+                                    "Link operation found multiple existing courses for class '%s' with id %s. Skipping linking.",
                                     $class->get('title'),
                                     $class->get('sourcedId')
                                 ),
                                 4
                             );
+                            $link_courses = [];
+                        } else {
+                            // try to link the course
+                            $link_course = reset($link_courses);
+                            // update course idnumber to the current class
+                            $DB->update_record('course', (object) [
+                                'id' => $link_course->id,
+                                'idnumber' => $link_course->idnumber
+                            ]);
+                            $this->get_trace()->output(
+                                    sprintf(
+                                        "Linked existing course '%s' with id %s to class '%s' with id %s",
+                                        $existingcourse->fullname,
+                                        $existingcourse->idnumber,
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                            $this->get_trace()->output(
+                                    sprintf(
+                                        "Resetting all user data for course '%s' with id %s as it has been linked to an existing course",
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
                             require_once("{$CFG->dirroot}/course/lib.php");
                             // reset course
                             $student_role = get_archetype_roles('student');
                             $data = (object) array(
-                                'id' => $existingcourse->id,
+                                'id' => $link_course->id,
                                 'reset_events' => 1,
                                 'reset_notes' => 1,
                                 'reset_gradebook_items' => 1,
@@ -610,20 +722,8 @@ EOF;
                                 'reset_quiz_group_overrides' => 1
                             );
                             $status = reset_course_userdata($data);
-                            break;
-                        } else {
-                            $this->get_trace()->output(
-                                sprintf(
-                                    "Link operation did not find existing course for class '%s' with id %s. Continuing search.",
-                                    $otherclass->get('title'),
-                                    $otherclass->get('sourcedId')
-                                ),
-                                4
-                            );
                         }
                     }
-                } else {
-                    $metadata = $this->get_course_metadata($existingcourse->id);
                 }
             }
             
