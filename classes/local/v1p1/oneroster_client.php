@@ -24,6 +24,7 @@
 
 namespace enrol_oneroster\local\v1p1;
 
+use core\output\progress_trace\text_progress_trace;
 use DateTime;
 use Exception;
 use context_user;
@@ -53,6 +54,8 @@ use enrol_oneroster\local\entities\school as school_entity;
 use enrol_oneroster\local\entities\user as user_entity;
 use enrol_oneroster\local\entities\term as term_entity;
 use enrol_oneroster\local\entities\academic_session as academic_session_entity;
+use enrol_oneroster\local\collections\academic_sessions as academic_sessions_collection;
+use mod_bigbluebuttonbn\local\helpers\reset;
 use moodle_url;
 use progress_trace;
 use stdClass;
@@ -98,6 +101,11 @@ trait oneroster_client {
 
     /** @var array List of tracking metrics */
     protected $metrics = [];
+
+    /**
+     * @var stdClass[] Cache of all academic sessions
+     */
+    protected $all_academic_sessions = null;
 
     /**
      * Get the Base URL for this One Roster API version.
@@ -211,19 +219,21 @@ trait oneroster_client {
         }
         
         $this->get_trace()->output("Completed synchronisation of Rostering information");
-        $this->get_trace()->output(sprintf("Entity\t\tCreate\tUpdate\tExclude\tDelete"), 1);
-        foreach ($this->get_metrics() as $thing => $actions) {
-            $this->get_trace()->output(
-                sprintf(
-                    "Entity '%s'\t%d\t%d\t%d\t%d",
-                    $thing,
-                    $actions['create'],
-                    $actions['update'],
-                    $actions['exclude'],
-                    $actions['delete']
-                ),
-                1
-            );
+        if ($this->get_trace() instanceof text_progress_trace) {
+            $this->get_trace()->output(sprintf("Entity\t\tCreate\tUpdate\tExclude\tDelete"), 1);
+            foreach ($this->get_metrics() as $thing => $actions) {
+                $this->get_trace()->output(
+                    sprintf(
+                        "Entity '%s'\t%d\t%d\t%d\t%d",
+                        $thing,
+                        $actions['create'],
+                        $actions['update'],
+                        $actions['exclude'],
+                        $actions['delete']
+                    ),
+                    1
+                );
+            }
         }
     }
 
@@ -298,6 +308,59 @@ EOF;
         }
         $this->get_trace()->output("Finished processing users. Processed {$usercount} users", 3);
     }
+
+    private function get_course_metadata($courseid) {
+        $handler = \core_customfield\handler::get_handler('core_course', 'course');
+        // This is equivalent to the line above.
+        //$handler = \core_course\customfield\course_handler::create();
+        $datas = $handler->get_instance_data($courseid, true);
+        $metadata = [];
+        foreach ($datas as $data) {
+            if (empty($data->get_value())) {
+                continue;
+            }
+            $field = $data->get_field();
+            //$cat = $field->get_category()->get('name');
+            // get field type
+            $type = $field->get('type');
+            if ($type === 'select') {
+                $value = intval($data->get_value()) - 1;
+                // get options
+                $options = $field->get('configdata')['options'];
+                // options is a \n separated list of values
+                $options = array_map('trim', explode("\n", $options));
+                if ($options && array_key_exists($value, $options)) {
+                    $metadata[$field->get('shortname')] = $options[$value];
+                } else {
+                    $metadata[$field->get('shortname')] = '-';
+                }
+            } else {
+                $metadata[$field->get('shortname')] = $data->get_value();
+            }
+        }
+        return $metadata;
+    }
+
+    private function get_all_academic_sessions(): array {
+        if ($this->all_academic_sessions !== null) {
+            return $this->all_academic_sessions;
+        }
+        // get all academic sessions
+        /**
+         * @var academic_sessions_collection $academic_sessions
+         */
+        $academic_session_collection = $this->get_container()->get_collection_factory()->get_academic_sessions([]);
+        /**
+         * @var stdClass[]
+         * 
+         */
+        $this->all_academic_sessions = [];
+        foreach ($academic_session_collection as $session) {
+            $this->all_academic_sessions[] = $session->get_data();
+        }
+        return $this->all_academic_sessions;
+    }
+
     /**
      * Synchronise the entire School.
      *
@@ -307,6 +370,7 @@ EOF;
     public function sync_school(school_entity $school, ?DateTime $onlysince = null, ?array $filter = null): void {
         global $CFG, $DB;
         require_once("{$CFG->dirroot}/group/lib.php");
+        require_once("{$CFG->dirroot}/course/lib.php");
         // Updating the category for this school.
         $this->update_or_create_category($school);
 
@@ -364,7 +428,17 @@ EOF;
         $snapshots = $this->container->get_cache_factory()->get_class_snapshot_cache();
         // use class groups
         $use_class_groups = get_config('enrol_oneroster', 'oneroster_sync_groups');
+
+        $keep_existing_class = get_config('enrol_oneroster', 'keep_existing_class');
+        /**
+         * get all academic sessions
+         * @var stdClass[]
+         */
+        $academic_sessions = $this->get_all_academic_sessions();
+
         foreach ($classes as $class) {
+            // status to track if class has been linked to an existing course
+            $class_linked = false;
             // get class snapshot
             $sourcedid = $class->get('sourcedId');
             $snapshot = $snapshots->get($sourcedid);
@@ -397,6 +471,292 @@ EOF;
                 4
             );
 
+            // before updating or creating course, check if course exists for a different term
+            $link_courses = [];
+            if ($keep_existing_class) {
+                // search for existing course with the same idnumber
+                $existingcourse = $DB->get_record('course', ['idnumber' => $class->get('sourcedId')]);
+                // if course does not exist, search for an existing course associated with a different term 
+                if (!$existingcourse) {
+                    // get one roster classes filtering by course
+                    $course = $class->get('course')->sourcedId;
+                    $otherclasses_collection = $this->get_container()->get_collection_factory()->get_classes(
+                        [],
+                        (new filter())->add_filter('course', $course, '=')
+                    );
+                    $this->get_trace()->output(
+                        sprintf(
+                            "Searching for existing course to link to class '%s' with id %s",
+                            $class->get('title'),
+                            $class->get('sourcedId')
+                        ),
+                        4   
+                    );
+                    $otherclasses = [];
+                    foreach ($otherclasses_collection as $otherclass) {
+                        $otherclasses[] = $otherclass;
+                        $otherclass->terms = array_map(function($term) use ($academic_sessions) {
+                            return current(array_filter($academic_sessions, function ($value) use ($term) {
+                                return $value->sourcedId == $term->sourcedId;
+                            }));
+                        }, $otherclass->get('terms'));
+                    }
+                    $this->get_trace()->output(
+                        sprintf(
+                            "Found %d other classes for course '%s'",
+                            count($otherclasses),
+                            $course
+                        ),
+                        4   
+                    );
+                    // get first term of the class being processed
+                    $class_term = current($class->get('terms'));
+                    if ($class_term) {
+                        $class_term = current(array_filter($academic_sessions, function ($value) use ($class_term) {
+                            return $value->sourcedId == $class_term->sourcedId;
+                        }));
+                    }
+                    // filter other classes to only those that have a term in common with the class being processed
+                    $otherclasses = array_filter($otherclasses, function($otherclass) use ($class_term, $class) {
+                        if ($otherclass->get('sourcedId') == $class->get('sourcedId')) {
+                            return false;
+                        }
+                        // filter out classes that do not have any term in common with the class being processed
+                        $otherclass_term = reset($otherclass->terms);
+                        if ($otherclass_term && $otherclass_term->metadata && $otherclass_term->metadata->href) {
+                            return $class_term->metadata->href == $otherclass_term->metadata->href;
+                        }
+                        return false;
+                    });
+
+                    $this->get_trace()->output(
+                        sprintf(
+                            "After filtering by term, found %d other classes for course '%s'",
+                            count($otherclasses),
+                            $course
+                        ),
+                        4   
+                    );
+
+                    if (count($otherclasses) > 1) {
+                        $this->get_trace()->output(
+                            sprintf(
+                                "Warning: Found %d other classes for course '%s' while processing class '%s' with id %s. Skipping link process.",
+                                count($otherclasses),
+                                $course,
+                                $class->get('title'),
+                                $class->get('sourcedId')
+                            ),
+                            4   
+                        );
+                        $otherclasses = [];
+                    }
+                    foreach ($otherclasses as $otherclass) {
+                        $existingcourse = $DB->get_record('course', ['idnumber' => $otherclass->get('sourcedId')]);
+                        if ($existingcourse) {
+                            // get custom field
+                            $metadata = $this->get_course_metadata($existingcourse->id);
+                            $course_keep_existing_class = $metadata['keep_existing_class'] ?? 'Yes';
+                            if (strtolower($course_keep_existing_class) == 'no') {
+                                // if keep existing is not set, continue
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as the corresponding course has 'keep_existing_class' set to 'No'",
+                                        $otherclass->get('title'),
+                                        $otherclass->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                                continue;
+                            }
+                            // we are expecting that the existing course should be associated with
+                            // the corresponding academic session of another school/academic year
+                            // get first term of the current class
+                            $otherclass_term = current($otherclass->get('terms'));
+                            if ($otherclass_term) {
+                                $otherclass_term = current(array_filter($academic_sessions, function ($value) use ($otherclass_term) {
+                                    return $value->sourcedId == $otherclass_term->sourcedId;
+                                }));
+                            }
+                            // if no term for other class, continue
+                            if (!$otherclass_term) {
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as it has no term associated",
+                                        $otherclass->get('title'),
+                                        $otherclass->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                                continue;
+                            }
+                            // "keep existing class" process is trying to find a course associated with a corresponding term
+                            // this operation is not really supported by one roster spec (an academic session cannot be identified across different school years)
+                            // for supporting this feature, we are assuming that that academic session metadata holds such information
+                            // a proposal for having a standard way of identifying academic sessions across school years might be metadata.href attribute 
+                            // where the producer of the one roster might include an academic session identifier across school years
+                            $otherclass_term->metadata = $otherclass_term->metadata ?? new stdClass();
+                            $otherclass_term->metadata->href = $otherclass_term->metadata->href ?? '00000000-0000-0000-0000-000000000001';
+
+                            // get first term of processing class
+                            $class_term = current($class->get('terms'));
+                            if ($class_term) {
+                                $class_term = current(array_filter($academic_sessions, function ($value) use ($class_term) {
+                                    return $value->sourcedId == $class_term->sourcedId;
+                                }));
+                            }
+                            // if no term for class, continue
+                            if (!$class_term) {
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as it has no term associated",
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                                continue;
+                            }
+                            $class_term->metadata = $class_term->metadata ?? new stdClass();
+                            $class_term->metadata->href = $class_term->metadata->href ?? '00000000-0000-0000-0000-000000000002';
+
+                            if ($otherclass_term->metadata->href != $class_term->metadata->href) {
+                                // if terms do not match, continue
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Skipping class '%s' with id %s as it is associated with a different academic session",
+                                        $otherclass->get('title'),
+                                        $otherclass->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                                continue;
+                            }
+
+                            $this->get_trace()->output(
+                                sprintf(
+                                    "Preparing to link existing course '%s' with id %s to class '%s' with id %s",
+                                    $existingcourse->fullname,
+                                    $existingcourse->idnumber,
+                                    $class->get('title'),
+                                    $class->get('sourcedId')
+                                ),
+                                4
+                            );
+                            $link_courses[] = (object) array(
+                                'id' => $existingcourse->id,
+                                'fullname' => $existingcourse->fullname,
+                                'idnumber' => $class->get('sourcedId')
+                            );
+                        }
+                        // the link operation did not find any course
+                        if (count($link_courses) == 0) {
+                                $this->get_trace()->output(
+                                    sprintf(
+                                        "Link operation did not find existing course for class '%s' with id %s.",
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                        } else if (count($link_courses) > 1) { 
+                            // if more than one course found, skip linking
+                            $this->get_trace()->output(
+                                sprintf(
+                                    "Link operation found multiple existing courses for class '%s' with id %s. Skipping linking.",
+                                    $class->get('title'),
+                                    $class->get('sourcedId')
+                                ),
+                                4
+                            );
+                            $link_courses = [];
+                        } else {
+                            // try to link the course
+                            $link_course = reset($link_courses);
+                            // update course idnumber to the current class
+                            $DB->update_record('course', (object) [
+                                'id' => $link_course->id,
+                                'idnumber' => $link_course->idnumber
+                            ]);
+                            $this->get_trace()->output(
+                                    sprintf(
+                                        "Linked existing course '%s' with id %s to class '%s' with id %s",
+                                        $existingcourse->fullname,
+                                        $existingcourse->idnumber,
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                            $this->get_trace()->output(
+                                    sprintf(
+                                        "Resetting all user data for course '%s' with id %s as it has been linked to an existing course",
+                                        $class->get('title'),
+                                        $class->get('sourcedId')
+                                    ),
+                                    4
+                                );
+                            require_once("{$CFG->dirroot}/course/lib.php");
+                            // reset course
+                            $student_role = get_archetype_roles('student');
+                            
+                            $data = (object) array(
+                                'id' => $link_course->id,
+                                'reset_events' => 1,
+                                'reset_notes' => 1,
+                                'reset_chat' => 1,
+                                'reset_gradebook_items' => 0,
+                                'unenrol_users' => array_keys($student_role),
+                                'reset_gradebook_grades' => 1,
+                                'reset_completion' => 1,
+                                'reset_groups' => 0,
+                                'reset_groups_members' => 1,
+                                'reset_groups_remove' => 0,
+                                'reset_groupings' => 0,
+                                'reset_groupings_remove' => 0,
+                                'reset_groupings_members' => 0,
+                                'reset_outcomes' => 0,
+                                'reset_forum_subscriptions' => 1,
+                                'reset_forum_all' => 1,
+                                'reset_forum_types' => 'general,social,blog,eachuser,single,qanda',
+                                'reset_drafts' => 1,
+                                'reset_user_preferences' => 0,
+                                'reset_assign_submissions' => 1,
+                                'reset_assign_user_overrides' => 1,
+                                'reset_assign_group_overrides' => 1,
+                                'reset_quiz_attempts' => 1,
+                                'reset_quiz_user_overrides' => 1,
+                                'reset_quiz_group_overrides' => 1,
+                                'reset_quiz_grades' => 1,
+                                'reset_attendance_log' => 1,
+                                'reset_attendance_statuses' => 1,
+                                'reset_attendance_sessions' => 1,
+                                'reset_checklist_progress' => 1,
+                                'reset_wiki_comments' => 1,
+                                'reset_wiki_tags' => 1,
+                                'reset_survey_answers' => 1,
+                                'reset_survey_analysis' => 1,
+                                'reset_data' => 1,
+                                'reset_lesson' => 1,
+                                'reset_workshop_submissions' => 1,
+                                'reset_workshop_assessments' => 1,
+                                'reset_workshop_grades' => 1,
+                                'reset_choice' => 1,
+                                'reset_choicegroup' => 1,
+                                'reset_scorm' => 1,
+                                'reset_bookmarks' => 1,
+                                'reset_workshop_phase' => 1,
+                                'reset_glossary_all' => 0,
+                                'reset_glossary_ratings' => 0,
+                                'reset_glossary_comments' => 0
+
+                            );
+                            $status = reset_course_userdata($data);
+                        }
+                    }
+                }
+            }
+            
             // update or create class
             $localcourse = $this->update_or_create_course($class);
             if (!$localcourse) {
@@ -545,11 +905,13 @@ EOF;
                         }
                         // unenrol the user
                         $localuser = \core_user::get_user($userid);
-                        $this->get_trace()->output(sprintf(
-                            "Unenroling user %s from course with id %s",
-                            $localuser->username,
-                            $localcourse->id
-                        ), 5);
+                        if ($this->get_trace() instanceof text_progress_trace) {
+                            $this->get_trace()->output(sprintf(
+                                "Unenroling user %s from course with id %s",
+                                $localuser->username,
+                                $localcourse->id
+                            ), 5);
+                        }
                         // feature: course group management
                         // description: remove user from groups
                         if (is_array($localcourse->groups)) {

@@ -324,6 +324,14 @@ if ($ADMIN->fulltree) {
     ));
 
     $settings->add(new admin_setting_configselect(
+        'enrol_oneroster/keep_existing_class',
+         get_string('settings_keep_existing_class', 'enrol_oneroster')  ,
+        get_string('settings_keep_existing_class_desc', 'enrol_oneroster'),
+        0,
+        $yesno
+    ));
+
+    $settings->add(new admin_setting_configselect(
         'enrol_oneroster/oneroster_exclude_inactive',
         get_string('settings_connection_oneroster_exclude_inactive', 'enrol_oneroster'),
         get_string('settings_connection_oneroster_exclude_inactive_desc', 'enrol_oneroster'),
