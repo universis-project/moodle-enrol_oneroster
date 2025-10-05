@@ -699,19 +699,26 @@ EOF;
                             require_once("{$CFG->dirroot}/course/lib.php");
                             // reset course
                             $student_role = get_archetype_roles('student');
+                            
                             $data = (object) array(
                                 'id' => $link_course->id,
                                 'reset_events' => 1,
                                 'reset_notes' => 1,
-                                'reset_gradebook_items' => 1,
+                                'reset_chat' => 1,
+                                'reset_gradebook_items' => 0,
                                 'unenrol_users' => array_keys($student_role),
                                 'reset_gradebook_grades' => 1,
                                 'reset_completion' => 1,
                                 'reset_groups' => 0,
+                                'reset_groups_members' => 1,
+                                'reset_groups_remove' => 0,
                                 'reset_groupings' => 0,
-                                'reset_outcomes' => 1,
+                                'reset_groupings_remove' => 0,
+                                'reset_groupings_members' => 0,
+                                'reset_outcomes' => 0,
                                 'reset_forum_subscriptions' => 1,
                                 'reset_forum_all' => 1,
+                                'reset_forum_types' => 'general,social,blog,eachuser,single,qanda',
                                 'reset_drafts' => 1,
                                 'reset_user_preferences' => 0,
                                 'reset_assign_submissions' => 1,
@@ -719,7 +726,30 @@ EOF;
                                 'reset_assign_group_overrides' => 1,
                                 'reset_quiz_attempts' => 1,
                                 'reset_quiz_user_overrides' => 1,
-                                'reset_quiz_group_overrides' => 1
+                                'reset_quiz_group_overrides' => 1,
+                                'reset_quiz_grades' => 1,
+                                'reset_attendance_log' => 1,
+                                'reset_attendance_statuses' => 1,
+                                'reset_attendance_sessions' => 1,
+                                'reset_checklist_progress' => 1,
+                                'reset_wiki_comments' => 1,
+                                'reset_wiki_tags' => 1,
+                                'reset_survey_answers' => 1,
+                                'reset_survey_analysis' => 1,
+                                'reset_data' => 1,
+                                'reset_lesson' => 1,
+                                'reset_workshop_submissions' => 1,
+                                'reset_workshop_assessments' => 1,
+                                'reset_workshop_grades' => 1,
+                                'reset_choice' => 1,
+                                'reset_choicegroup' => 1,
+                                'reset_scorm' => 1,
+                                'reset_bookmarks' => 1,
+                                'reset_workshop_phase' => 1,
+                                'reset_glossary_all' => 0,
+                                'reset_glossary_ratings' => 0,
+                                'reset_glossary_comments' => 0
+
                             );
                             $status = reset_course_userdata($data);
                         }
