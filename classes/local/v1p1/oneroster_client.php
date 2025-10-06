@@ -480,9 +480,21 @@ EOF;
                 if (!$existingcourse) {
                     // get one roster classes filtering by course
                     $course = $class->get('course')->sourcedId;
+
+                    // try to check if class metadata contains information about class indexing
+                    $class_index = -1;
+                    $class_metadata = $class->get('metadata');
+                    if ($class_metadata && is_int($class_metadata->classIndex)) {
+                        $class_index = $class_metadata->classIndex;
+                    }
+                    $otherclass_filter = (new filter())->add_filter('course', $course, '=');
+                    if ($class_index >= 0) {
+                        // if class index is set, filter by class index
+                        $otherclass_filter->add_filter('metadata.classIndex', $class_index, '=');
+                    }
                     $otherclasses_collection = $this->get_container()->get_collection_factory()->get_classes(
                         [],
-                        (new filter())->add_filter('course', $course, '=')
+                        $otherclass_filter
                     );
                     $this->get_trace()->output(
                         sprintf(
