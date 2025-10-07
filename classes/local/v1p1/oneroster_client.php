@@ -488,6 +488,8 @@ EOF;
                         $class_index = $class_metadata->classIndex;
                     }
                     $otherclass_filter = (new filter())->add_filter('course', $course, '=');
+                    // exclude tobedeleted classes
+                    $otherclass_filter->add_filter('status', 'tobedeleted', '!=');
                     if ($class_index >= 0) {
                         // if class index is set, filter by class index
                         $otherclass_filter->add_filter('metadata.classIndex', $class_index, '=');
