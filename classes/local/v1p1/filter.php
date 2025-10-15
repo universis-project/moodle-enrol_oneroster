@@ -53,9 +53,9 @@ class filter extends filter_base {
      * @return  filter_interface
      */
     public function add_filter(string $field, string $value, string $predicate = '='): filter_interface {
-        if (count($this->filters) >= 2) {
-            throw new \InvalidArgumentException("You may only specify two filters");
-        }
+        // if (count($this->filters) >= 2) {
+        //     throw new \InvalidArgumentException("You may only specify two filters");
+        // }
 
         $this->filters[] = sprintf(
             "%s%s'%s'",
