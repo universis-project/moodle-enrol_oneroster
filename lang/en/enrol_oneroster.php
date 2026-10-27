@@ -97,6 +97,6 @@ $string['settings_connection_oneroster_user_institution_desc'] = 'Define the att
 $string['settings_keep_existing_class'] = 'Keep existing classes';
 $string['settings_keep_existing_class_desc'] = 'If enabled, existing courses will be synchronized, even if they appear to refer to a different academic session based on their attributes. A Moodle course will be linked and synchronized to the given OneRoster class.';
 $string['settings_connection_oneroster_disable_category_update'] = 'Disable course category update';
-$string['settings_connection_oneroster_disable_category_update_desc'] = 'If enabled, the course category will not be updated during the synchronization process. Otherwise, the course category will remain unchanged, even if it differs from the category specified in the OneRoster data. This behavior ensures that existing course categories are preserved.';
+$string['settings_connection_oneroster_disable_category_update_desc'] = 'If enabled, the course category will not be updated during the synchronization process. The course category will remain unchanged, even if it differs from the category specified in the OneRoster data. This behavior ensures that existing course categories are preserved.';
 
 
