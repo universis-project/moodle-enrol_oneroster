@@ -339,6 +339,14 @@ if ($ADMIN->fulltree) {
         $yesno
     ));
 
+    $settings->add(new admin_setting_configselect(
+        'enrol_oneroster/oneroster_disable_category_update',
+        get_string('settings_connection_oneroster_disable_category_update', 'enrol_oneroster'),
+        get_string('settings_connection_oneroster_disable_category_update_desc', 'enrol_oneroster'),
+        0,
+        $yesno
+    ));
+
     $settings->add(new admin_setting_configmultiselect(
         'enrol_oneroster/datasync_schools',
         get_string('settings_datasync_schools', 'enrol_oneroster'),

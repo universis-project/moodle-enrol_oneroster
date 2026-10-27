@@ -1095,6 +1095,8 @@ EOF;
         }
         $this->modifiedentities[$entity->get('sourcedId')] = true;
 
+        $disable_category_update = get_config('enrol_oneroster', 'oneroster_disable_category_update');
+
         // Check for any parents and create/update those too.
         // The alternative is that we fetch all of the ones we need and create them once.
         if ($parent = $entity->get_parent()) {
@@ -1104,7 +1106,10 @@ EOF;
 
         if ($localcategoryid) {
             $localcategory = core_course_category::get($localcategoryid);
-
+            // if category updates are disabled, return the local category as is.
+            if ($disable_category_update) {
+                return $localcategory;
+            }
             $remotelastmodified = converter::from_datetime_to_unix($entity->get('dateLastModified'));
             if ($remotelastmodified > $localcategory->timemodified) {
                 $localcategory->update($remotecategory);

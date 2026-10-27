@@ -24,12 +24,12 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2025101501;        // The current plugin version (Date: YYYYMMDDXX).
+$plugin->version   = 2026102701;        // The current plugin version (Date: YYYYMMDDXX).
 $plugin->requires  = 2019052000;        // Requires this Moodle version.
 $plugin->supported = [
     405,
     500
 ];
 $plugin->component = 'enrol_oneroster'; // Full name of the plugin (used for diagnostics).
-$plugin->release = '2025-10-15';
+$plugin->release = '2026-10-27';
 $plugin->maturity = MATURITY_STABLE;
